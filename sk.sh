@@ -1,78 +1,124 @@
+bash -c 'set -e
+mkdir -p /opt
+DB="/opt/lxc-rdp-db.txt"
+touch $DB
+
+cat >/usr/local/bin/lxc-rdp-create << "EOF"
 #!/usr/bin/env bash
 set -e
+DB="/opt/lxc-rdp-db.txt"
 
-# ================================
-# FIXED USER CONFIG (NO CHANGE)
-# ================================
-WIN_USER="docker"
-WIN_PASS="Docker@2025!"
+read -p "Enter username: " USERNAME
+read -p "CPU cores: " CPU
+read -p "RAM (example 8g): " RAM
+read -p "Disk (example 120G): " DISK
 
-# ================================
-# ASK USER FOR RESOURCES
-# ================================
-read -p "Enter CPU cores (example: 8): " CPU_CORES
-read -p "Enter RAM size (example: 24g): " RAM_SIZE
-read -p "Enter Disk size (example: 120G): " DISK_SIZE
+PASSWORD=$(openssl rand -base64 12 | tr -dc A-Za-z0-9 | head -c 10)
 
-read -p "Enter RDP port (example: 3389): " rdp_port
-read -p "Enter Web port (example: 8080): " web_port
+get_port(){
+while true; do
+PORT=$(shuf -i 20000-50000 -n1)
+ss -tuln | grep -q ":$PORT " || { echo $PORT; return; }
+done
+}
 
-# ================================
-# BASIC VALIDATION
-# ================================
-if [[ -z "$rdp_port" || -z "$web_port" ]]; then
-  echo "ERROR: RDP port and Web port must not be empty"
-  exit 1
-fi
+RDP_PORT=$(get_port)
+WEB_PORT=$(get_port)
 
-# ================================
-# SYSTEM CONFIG
-# ================================
-CONTAINER_NAME="windows-server-2025"
-DATA_DIR="$HOME/windows-data"
+while [ "$RDP_PORT" = "$WEB_PORT" ]; do
+WEB_PORT=$(get_port)
+done
 
-# ================================
-# HARD REQUIREMENTS CHECK
-# ================================
+CONTAINER="windows-$USERNAME-$(date +%s)"
+DATA="$HOME/windows-$USERNAME"
+
+mkdir -p "$DATA"
+
 if [ ! -e /dev/kvm ]; then
-  echo "ERROR: /dev/kvm not found (KVM required)"
-  exit 1
+echo "KVM not available"
+exit 1
 fi
 
-# ================================
-# PREPARE STORAGE
-# ================================
-mkdir -p "$DATA_DIR"
-
-# ================================
-# PERFORMANCE TUNING
-# ================================
-export DOCKER_BUILDKIT=1
-
-# ================================
-# REMOVE OLD CONTAINER
-# ================================
-docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
-
-# ================================
-# RUN WINDOWS CONTAINER
-# ================================
 docker run -d \
-  --name "$CONTAINER_NAME" \
-  --restart unless-stopped \
-  --device /dev/kvm \
-  --cap-add NET_ADMIN \
-  --security-opt seccomp=unconfined \
-  --memory "$RAM_SIZE" \
-  --cpus "$CPU_CORES" \
-  -p "$rdp_port:$rdp_port" \
-  -p "$web_port:$web_port" \
-  -v "$DATA_DIR:/storage" \
-  -e VERSION=2025 \
-  -e DISK_SIZE="$DISK_SIZE" \
-  -e USERNAME="$WIN_USER" \
-  -e PASSWORD="$WIN_PASS" \
-  -e AUTO_START=yes \
-  -e SKIP_CHECKS=yes \
-  -e ENABLE_KVM=yes \
-  dockurr/windows
+--name "$CONTAINER" \
+--restart unless-stopped \
+--device /dev/kvm \
+--cap-add NET_ADMIN \
+--security-opt seccomp=unconfined \
+--memory "$RAM" \
+--cpus "$CPU" \
+-p $RDP_PORT:3389 \
+-p $WEB_PORT:8006 \
+-v "$DATA:/storage" \
+-e VERSION=2025 \
+-e DISK_SIZE="$DISK" \
+-e USERNAME="$USERNAME" \
+-e PASSWORD="$PASSWORD" \
+-e AUTO_START=yes \
+-e SKIP_CHECKS=yes \
+-e ENABLE_KVM=yes \
+dockurr/windows
+
+IP=$(curl -s ifconfig.me || hostname -I | awk "{print \$1}")
+
+echo "$USERNAME|$PASSWORD|$IP|$RDP_PORT|$WEB_PORT|$CONTAINER" >> $DB
+
+echo ""
+echo "==============================="
+echo "RDP CREATED"
+echo "==============================="
+echo "Username : $USERNAME"
+echo "Password : $PASSWORD"
+echo "IP       : $IP"
+echo "RDP Port : $RDP_PORT"
+echo "Web      : http://$IP:$WEB_PORT"
+echo "==============================="
+EOF
+
+chmod +x /usr/local/bin/lxc-rdp-create
+
+cat >/usr/local/bin/lxc-rdp-list << "EOF"
+#!/usr/bin/env bash
+DB="/opt/lxc-rdp-db.txt"
+printf "%-15s %-15s %-10s\n" "USERNAME" "IP" "RDP_PORT"
+echo "---------------------------------------------"
+while IFS="|" read -r USER PASS IP RDP WEB CONT; do
+printf "%-15s %-15s %-10s\n" "$USER" "$IP" "$RDP"
+done < $DB
+EOF
+
+chmod +x /usr/local/bin/lxc-rdp-list
+
+cat >/usr/local/bin/lxc-rdp-info << "EOF"
+#!/usr/bin/env bash
+DB="/opt/lxc-rdp-db.txt"
+USER=$1
+
+if [ -z "$USER" ]; then
+echo "Usage: lxc-rdp-info USERNAME"
+exit 1
+fi
+
+grep "^$USER|" $DB | while IFS="|" read U P IP RDP WEB CONT; do
+echo "================================"
+echo "Username   : $U"
+echo "Password   : $P"
+echo "IP         : $IP"
+echo "RDP Port   : $RDP"
+echo "Web Panel  : http://$IP:$WEB"
+echo "Container  : $CONT"
+echo "================================"
+done
+EOF
+
+chmod +x /usr/local/bin/lxc-rdp-info
+
+echo "===================================="
+echo "RDP SYSTEM INSTALLED"
+echo ""
+echo "Commands available:"
+echo "lxc-rdp-create"
+echo "lxc-rdp-list"
+echo "lxc-rdp-info USERNAME"
+echo "===================================="
+'
