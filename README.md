@@ -1,6 +1,5 @@
 # 🖥️ Windows 11 Automated RDP Setup Script
 
-![Windows 11 Banner](https://upload.wikimedia.org/wikipedia/commons/5/5f/Windows_11_Logo.png)
 
 **By ALLAY XD 20**
 
@@ -14,7 +13,7 @@
 
 ## 📌 Overview
 
-This Bash script automates the setup of a **Windows 11 virtual machine** on Ubuntu 22 using **KVM/QEMU**, with the following features:
+This Bash script automates the setup of a **Windows 11 virtual machine** on Ubuntu 22/debine etc using **KVM/QEMU/WITHOUT KVM**, with the following features:
 
 - Fully automated Windows 11 VM installation
 - Allocates **most RAM, all CPU cores, and maximum disk space**
